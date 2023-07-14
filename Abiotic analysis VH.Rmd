@@ -1,0 +1,761 @@
+---
+title: "Abiotic analysis - VH 20230623"
+author: "Vera Hesen"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r starting information}
+
+# Input:
+## abiotic_data_VH.csv
+## extradata_all_VH.csv extradata (used for coloring plots)
+
+# Output:
+## Descriptive statistics (ANOVA)
+## Boxplots per field and per succession stage
+## PCA of soil abiotic factors
+## MANOVA of soil abiotic factors
+## LDA of soil abiotic factors
+
+
+#NOTE: Samples REIJ4, REIJ5 and REIJ6 have been removed from the data analysis
+
+```
+
+
+#Package and data set loading
+
+```{r loading required packages}
+
+library(knitr)
+library(data.table)
+library(writexl)
+library(dplyr)
+
+library(ggplot2) #used to visualize boxplots
+library(cowplot) #theme for plots
+library(ggforce) #plotting CVA part ellipsoids
+
+library(car) # used for Anova() (type II ANOVA) and Manova()
+library(FactoMineR) # used to do PCA
+library(corrplot) #used for corrplot PCA
+library(factoextra) # used to visualize PCA results
+library(multcompView) #used for after post hoc with TukeyHSD to convert to letters
+library(MASS) #used for lda (CVA)
+library(rstatix) #used in MANOVA part (outliers, mahalanobis, mult variate shapiro, box_m )
+library(effectsize) #used to calculate effect size of explainig variables of MANOVA
+
+library(multcomp) 
+library(vegan) 
+```
+
+```{r loading required data sets}
+
+#Load input files from from separate locations
+
+#Abiotic data, with all samples
+df_abiotic <- data.frame(read.csv("abiotic_data_VH",header = TRUE, stringsAsFactors = F, sep = ","))
+
+df_abiotic[df_abiotic == "agri"] <- "agricultural"
+df_abiotic[df_abiotic == "mid"] <- "mid succession"
+df_abiotic[df_abiotic == "late"] <- "late succession"
+df_abiotic[df_abiotic == "roadverge"] <- "road verge"
+df_abiotic$succession <- factor(df_abiotic$succession, levels = c("agricultural","mid succession",
+                                                                  "late succession", "road verge"))
+# ordering levels in succession to succession stage
+df_abiotic$field <- factor(df_abiotic$field, 
+                           levels = c("AR1", "AR3","OR","REIJ", "TW1","MO", "NR", "MV","DK", "AR2", "TW2"))
+# ordering levels in field to succession stage
+
+#Open file with extra data like succession and field with all samples 
+
+extradata <- data.frame(read.csv("extradata_all_VH.csv", header = TRUE, sep = ";"))
+
+extradata <- extradata[,c(1:6)]
+extradata[extradata == "mid"] <- "mid succession"
+extradata[extradata == "late"] <- "late succession"
+extradata[extradata == "roadverge"] <- "road verge"
+
+# specify the order of successional stages and fields based on age
+succ_order <- c('agricultural', 'mid succession', 'late succession', 'road verge')
+field_order <- c('AR1', 'AR3', 'OR', 'REIJ', 'TW1', 'MO', 'NR', 'MV', 'DK', 'AR2', 'TW2')
+
+#Samples REIJ_4 REIJ_5 REIJ_6 have NA values, remove these from data frames for analysis
+df_abiotic <- df_abiotic[!(df_abiotic$sample=="V60" | df_abiotic$sample=="V61" |  df_abiotic$sample=="V62"),]
+extradata <- extradata[!(extradata$sample.code=="V60" | extradata$sample.code=="V61" |  extradata$sample.code=="V62"),]
+
+```
+
+
+# Descriptive statistics
+
+```{r Summarize function}
+## Gives count, mean, standard deviation, standard error of the mean, and confidence interval (default 95%).
+##   data: a data frame.
+##   measurevar: the name of a column that contains the variable to be summariezed
+##   groupvars: a vector containing names of columns that contain grouping variables
+##   na.rm: a boolean that indicates whether to ignore NA's
+##   conf.interval: the percent range of the confidence interval (default is 95%)
+summarySE <- function(data=NULL, measurevar, groupvars=NULL, na.rm=FALSE,
+                      conf.interval=.95, .drop=TRUE) {
+    library(plyr)
+
+    # New version of length which can handle NA's: if na.rm==T, don't count them
+    length2 <- function (x, na.rm=FALSE) {
+        if (na.rm) sum(!is.na(x))
+        else       length(x)
+    }
+
+    # This does the summary. For each group's data frame, return a vector with
+    # N, mean, and sd
+    datac <- ddply(data, groupvars, .drop=.drop,
+      .fun = function(xx, col) {
+        c(N    = length2(xx[[col]], na.rm=na.rm),
+          mean = mean   (xx[[col]], na.rm=na.rm),
+          sd   = sd     (xx[[col]], na.rm=na.rm)
+        )
+      },
+      measurevar
+    )
+
+    # Rename the "mean" column    
+    datac <- rename(datac, c("mean" = measurevar))
+
+    datac$se <- datac$sd / sqrt(datac$N)  # Calculate standard error of the mean
+
+    # Confidence interval multiplier for standard error
+    # Calculate t-statistic for confidence interval: 
+    # e.g., if conf.interval is .95, use .975 (above/below), and use df=N-1
+    ciMult <- qt(conf.interval/2 + .5, datac$N-1)
+    datac$ci <- datac$se * ciMult
+
+    return(datac)
+}
+```
+
+## Summaries by succession stage
+
+```{r Summarize by succession}
+
+#SOM data
+summary.succession.SOM <- summarySE(df_abiotic, measurevar="SOM", groupvars="succession")
+
+# PO4 data
+summary.succession.PO4 <- summarySE(df_abiotic, measurevar="PO4", groupvars="succession")
+
+# N_percentage data
+summary.succession.N_percentage <- summarySE(df_abiotic, measurevar="N_percentage", groupvars="succession")
+
+# C_percentage data
+summary.succession.C_percentage <- summarySE(df_abiotic, measurevar="C_percentage", groupvars="succession")
+
+# CN_ratio data
+summary.succession.CN_ratio <- summarySE(df_abiotic, measurevar="CN_ratio",groupvars="succession")
+
+```
+
+```{r overview table summary succession}
+
+summary.succession <- summary.succession.SOM[,c(1,2,3,5)]
+summary.succession <- cbind(summary.succession, summary.succession.PO4$PO4, summary.succession.PO4$se,
+                       summary.succession.N_percentage$N_percentage, summary.succession.N_percentage$se, 
+                       summary.succession.C_percentage$C_percentage, summary.succession.C_percentage$se,
+                       summary.succession.CN_ratio$CN_ratio, summary.succession.CN_ratio$se)
+
+colnames(summary.succession)[colnames(summary.succession) == "se"] <- "SOM se"
+colnames(summary.succession)[colnames(summary.succession) == "summary.succession.PO4$PO4"] <- "PO4"
+colnames(summary.succession)[colnames(summary.succession) == "summary.succession.PO4$se"] <- "PO4 se"
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.N_percentage$N_percentage"] <- "N_percentage"
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.N_percentage$se"] <- "N_percentage se"
+
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.C_percentage$C_percentage"] <- "C_percentage"
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.C_percentage$se"] <- "C_percentage se"
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.CN_ratio$CN_ratio"] <- "CN_ratio"
+colnames(summary.succession)[colnames(summary.succession) == 
+                          "summary.succession.CN_ratio$se"] <- "CN_ratio se"
+
+summary.succession 
+
+write_xlsx(summary.succession, "summary.succession_abiotic.xlsx")
+```
+
+
+# Hypothesis testing
+
+## Per succession stage
+
+```{r ANOVA pre work}
+
+## Testing equal variances per succession
+var_PO4 <- leveneTest(PO4 ~ succession/field, data = df_abiotic)
+var_PO4
+var_SOM <- leveneTest(SOM ~ succession/field, data = df_abiotic)
+var_SOM
+var_C_percentage <- leveneTest(C_percentage ~ succession/field, data = df_abiotic)
+var_C_percentage 
+var_N_percentage <- leveneTest(N_percentage ~ succession/field, data = df_abiotic)
+var_N_percentage 
+var_CN_ratio <- leveneTest(CN_ratio ~ succession/field, data = df_abiotic)
+var_CN_ratio
+
+## Testing normality
+qqnorm(df_abiotic$PO4, main='PO4')
+qqline(df_abiotic$PO4)
+hist(df_abiotic$PO4, main='PO4')
+ggplot(df_abiotic, aes(x=PO4, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_PO4 <- shapiro.test(df_abiotic$PO4)
+nor_PO4
+
+qqnorm(df_abiotic$SOM, main='SOM')
+qqline(df_abiotic$SOM)
+hist(df_abiotic$SOM, main='SOM')
+ggplot(df_abiotic, aes(x=SOM, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_SOM <- shapiro.test(df_abiotic$SOM)
+nor_SOM
+
+qqnorm(df_abiotic$C_percentage, main='C_percentage')
+qqline(df_abiotic$C_percentage)
+hist(df_abiotic$C_percentage, main='C_percentage')
+ggplot(df_abiotic, aes(x=C_percentage, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_C_percentage <- shapiro.test(df_abiotic$C_percentage)
+nor_C_percentage
+
+qqnorm(df_abiotic$N_percentage, main='N_percentage')
+qqline(df_abiotic$N_percentage)
+hist(df_abiotic$N_percentage, main='N_percentage')
+ggplot(df_abiotic, aes(x=N_percentage, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_N_percentage <- shapiro.test(df_abiotic$N_percentage)
+nor_N_percentage
+
+qqnorm(df_abiotic$CN_ratio, main='CN_ratio')
+qqline(df_abiotic$CN_ratio)
+hist(df_abiotic$CN_ratio, main='CN_ratio')
+ggplot(df_abiotic, aes(x=CN_ratio, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_CN_ratio <- shapiro.test(df_abiotic$CN_ratio)
+nor_CN_ratio
+
+
+## With this nested structure, it is better to test normality per group 
+
+#division data sets per group
+df_abiotic_agri <- subset(df_abiotic, succession == "agricultural")
+df_abiotic_mid <- subset(df_abiotic, succession == "mid succession")
+df_abiotic_late <- subset(df_abiotic, succession == "late succession")
+df_abiotic_rv <- subset(df_abiotic, succession == "road verge")
+
+#normality per succession for PO4 (all normal except RV)
+nor_PO4_agri <- shapiro.test(df_abiotic_agri$PO4)
+nor_PO4_agri
+nor_PO4_mid <- shapiro.test(df_abiotic_mid$PO4)
+nor_PO4_mid
+nor_PO4_late <- shapiro.test(df_abiotic_late$PO4)
+nor_PO4_late
+nor_PO4_rv <- shapiro.test(df_abiotic_rv$PO4)
+nor_PO4_rv      
+
+#normality per succession for SOM (all normal)
+nor_SOM_agri <- shapiro.test(df_abiotic_agri$SOM)
+nor_SOM_agri
+nor_SOM_mid <- shapiro.test(df_abiotic_mid$SOM)
+nor_SOM_mid
+nor_SOM_late <- shapiro.test(df_abiotic_late$SOM)
+nor_SOM_late
+nor_SOM_rv <- shapiro.test(df_abiotic_rv$SOM)
+nor_SOM_rv
+
+#normality per succession for C_percentage (all normal)
+nor_C_percentage_agri <- shapiro.test(df_abiotic_agri$C_percentage)
+nor_C_percentage_agri
+nor_C_percentage_mid <- shapiro.test(df_abiotic_mid$C_percentage)
+nor_C_percentage_mid
+nor_C_percentage_late <- shapiro.test(df_abiotic_late$C_percentage)
+nor_C_percentage_late
+nor_C_percentage_rv <- shapiro.test(df_abiotic_rv$C_percentage)
+nor_C_percentage_rv
+
+#normality per succession for N_percentage (all normal)
+nor_N_percentage_agri <- shapiro.test(df_abiotic_agri$N_percentage)
+nor_N_percentage_agri
+nor_N_percentage_mid <- shapiro.test(df_abiotic_mid$N_percentage)
+nor_N_percentage_mid
+nor_N_percentage_late <- shapiro.test(df_abiotic_late$N_percentage)
+nor_N_percentage_late
+nor_N_percentage_rv <- shapiro.test(df_abiotic_rv$N_percentage)
+nor_N_percentage_rv
+
+#normality per succession for CN_ratio (all normal)
+nor_CN_ratio_agri <- shapiro.test(df_abiotic_agri$CN_ratio)
+nor_CN_ratio_agri
+nor_CN_ratio_mid <- shapiro.test(df_abiotic_mid$CN_ratio)
+nor_CN_ratio_mid
+nor_CN_ratio_late <- shapiro.test(df_abiotic_late$CN_ratio)
+nor_CN_ratio_late
+nor_CN_ratio_rv <- shapiro.test(df_abiotic_rv$CN_ratio)
+nor_CN_ratio_rv
+
+```
+
+```{r Nested ANOVA succession - type II}
+
+# nested ANOVA to account for the field within succession factor
+
+aov2_succ_PO4 <- Anova(lm(PO4 ~ succession / field, data = df_abiotic), type = "II")
+aov2_succ_PO4
+capture.output(aov2_succ_PO4, file = "aov2_succ_PO4.txt")
+
+aov2_succ_SOM <- Anova(lm(SOM ~ succession / field, data = df_abiotic), type = "II") 
+aov2_succ_SOM
+capture.output(aov2_succ_SOM, file = "aov2_succ_SOM.txt")
+
+aov2_succ_C_percentage <- Anova(lm(C_percentage ~ succession / field, data = df_abiotic), type = "II") 
+aov2_succ_C_percentage
+capture.output(aov2_succ_C_percentage, file = "aov2_succ_C_percentage.txt")
+
+aov2_succ_N_percentage <- Anova(lm(N_percentage ~ succession / field, data = df_abiotic), type = "II") 
+aov2_succ_N_percentage
+capture.output(aov2_succ_N_percentage, file = "aov2_succ_N_percentage.txt")
+
+aov2_succ_CN_ratio <- Anova(lm(CN_ratio ~ succession / field, data = df_abiotic), type = "II")
+aov2_succ_CN_ratio
+capture.output(aov2_succ_CN_ratio, file = "aov2_succ_CN_ratio.txt")
+```
+
+```{r post hoc nested ANOVA succession}
+
+# TukeyHSD requires using aov (type I ANOVA), in combination with comment before, switch ANOVA type II to I to get PH results
+
+#PH for PO4
+aov1_succ_PO4 <- aov(PO4 ~ succession / field, data = df_abiotic)
+summary(aov1_succ_PO4)
+PH_PO4 <- TukeyHSD(aov1_succ_PO4)
+PH_PO4$succession
+capture.output(PH_PO4$succession, file = "PH_aov1_succ_PO4.txt")
+#for plotting
+PH_PO4.L <- multcompLetters(PH_PO4$succession[,4])
+PH_PO4.L.df <- as.data.frame(PH_PO4.L$Letters) 
+names(PH_PO4.L.df)[names(PH_PO4.L.df) == "PH_PO4.L$Letters"] <- "letters"
+PH_PO4.L.df <- tibble::rownames_to_column(PH_PO4.L.df, "succession")
+
+#PH for SOM
+aov1_succ_SOM <- aov(SOM ~ succession / field, data = df_abiotic)
+summary(aov1_succ_SOM)
+PH_SOM <- TukeyHSD(aov1_succ_SOM)
+PH_SOM$succession
+capture.output(PH_SOM$succession, file = "PH_aov1_succ_SOM.txt")
+#for plotting
+PH_SOM.L <- multcompLetters(PH_SOM$succession[,4])
+PH_SOM.L.df <- as.data.frame(PH_SOM.L$Letters) 
+names(PH_SOM.L.df)[names(PH_SOM.L.df) == "PH_SOM.L$Letters"] <- "letters"
+PH_SOM.L.df <- tibble::rownames_to_column(PH_SOM.L.df, "succession")
+
+#PH for C%
+aov1_succ_C_percentage <- aov(C_percentage ~ succession / field, data = df_abiotic)
+summary(aov1_succ_C_percentage)
+PH_C_percentage <- TukeyHSD(aov1_succ_C_percentage)
+PH_C_percentage$succession
+capture.output(PH_C_percentage$succession, file = "PH_aov1_succ_C_percentage.txt")
+#for plotting
+PH_C_percentage.L <- multcompLetters(PH_C_percentage$succession[,4])
+PH_C_percentage.L.df <- as.data.frame(PH_C_percentage.L$Letters) 
+names(PH_C_percentage.L.df)[names(PH_C_percentage.L.df) == "PH_C_percentage.L$Letters"] <- "letters"
+PH_C_percentage.L.df <- tibble::rownames_to_column(PH_C_percentage.L.df, "succession")
+
+#PH for N%
+aov1_succ_N_percentage <- aov(N_percentage ~ succession / field, data = df_abiotic)
+summary(aov1_succ_N_percentage)
+PH_N_percentage <- TukeyHSD(aov1_succ_N_percentage)
+PH_N_percentage$succession
+capture.output(PH_N_percentage$succession, file = "PH_aov1_succ_N_percentage.txt")
+#for plotting
+PH_N_percentage.L <- multcompLetters(PH_N_percentage$succession[,4])
+PH_N_percentage.L.df <- as.data.frame(PH_N_percentage.L$Letters) 
+names(PH_N_percentage.L.df)[names(PH_N_percentage.L.df) == "PH_N_percentage.L$Letters"] <- "letters"
+PH_N_percentage.L.df <- tibble::rownames_to_column(PH_N_percentage.L.df, "succession")
+
+#PH CN ratio
+aov1_succ_CN_ratio <- aov(CN_ratio ~ succession / field, data = df_abiotic)
+summary(aov1_succ_CN_ratio)
+PH_CN_ratio <- TukeyHSD(aov1_succ_CN_ratio)
+PH_CN_ratio$succession
+capture.output(PH_CN_ratio$succession, file = "PH_aov1_succ_CN_ratio.txt")
+#for plotting
+PH_CN_ratio.L <- multcompLetters(PH_CN_ratio$succession[,4])
+PH_CN_ratio.L.df <- as.data.frame(PH_CN_ratio.L$Letters) 
+names(PH_CN_ratio.L.df)[names(PH_CN_ratio.L.df) == "PH_CN_ratio.L$Letters"] <- "letters"
+PH_CN_ratio.L.df <- tibble::rownames_to_column(PH_CN_ratio.L.df, "succession")
+
+``` 
+
+
+## Boxplots 
+
+```{r Plotting soil chemistry by succession}
+
+#VH: SOM
+bp.succession.SOM <- ggplot(data= df_abiotic, aes(x=succession, y=SOM, fill = succession)) + 
+          geom_boxplot() +
+          labs(y="SOM", x=NULL) +
+          theme_bw() +
+          theme(legend.position="none") +
+          geom_text (data = PH_SOM.L.df, aes(y=13, label = letters), size =4)  +
+          theme(plot.title = element_text(hjust = 0.5)) +
+          ylim(0, NA) 
+plot(bp.succession.SOM)
+ggsave2(filename= "plot succession.SOM.png", plot = bp.succession.SOM, device = "png", width=5, height=4)
+
+#VH: PO4
+bp.succession.PO4 <- ggplot(data= df_abiotic, aes(x=succession, y=PO4, fill = succession)) + 
+          geom_boxplot() +
+          labs(title="PO4 per succession class", x=NULL) +
+          theme_bw() +
+          geom_text (data = summary.succession.PO4, aes(y=0, label = N), size =4) +
+          theme(legend.position="none") +
+          geom_text (data = PH_PO4.L.df, aes(y=150, label = letters), size =4) +
+          theme(plot.title = element_text(hjust = 0.5)) +
+          ylab(bquote(PO[4]-P  (mg/kg)))
+plot(bp.succession.PO4)
+ggsave2(filename= "plot succession.PO4.png", plot = bp.succession.PO4, device = "png", width=7, height=4)
+
+# For manuscript alternative plot for PO4
+bp.succession.PO4.alt <- ggplot(data= df_abiotic, aes(x=succession, y=PO4, fill = succession)) + 
+          geom_boxplot() +
+          theme_bw() +
+          theme(legend.position="none", axis.text.x = element_text(angle = 45, hjust=1), axis.title.x=element_blank()) +
+          geom_text (data = PH_PO4.L.df, aes(y=150, label = letters), size =4) +
+          ylab(bquote(PO[4]-P  (mg/kg))) +
+          ylim(0, NA)  
+plot(bp.succession.PO4.alt)
+ggsave2(filename= "plot succession.PO4.alt.png", plot = bp.succession.PO4.alt, device = "png", width=3, height=4) 
+
+#VH: N_percentage
+bp.succession.N_percentage <- ggplot(data= df_abiotic, aes(x=succession, y=N_percentage, 
+                                                        fill = succession)) + 
+          geom_boxplot() +
+          labs(y="N%", x = NULL) +
+          theme_bw() +
+          theme(legend.position="none") +
+          geom_text (data = PH_N_percentage.L.df, aes(y=0.7, label = letters), size =4)  +
+          theme(plot.title = element_text(hjust = 0.5))+
+          ylim(0, NA)  + 
+          scale_x_discrete(labels=c('agricultural', 'mid succession', 'late succession', 'road verge'))
+plot(bp.succession.N_percentage)
+ggsave2(filename= "plot succession.N_percentage.png", plot = bp.succession.N_percentage, device = "png", width=5, height=4)
+
+#VH: C_percentage
+bp.succession.C_percentage <- ggplot(data= df_abiotic, aes(x=succession, y=C_percentage, 
+                                                        fill = succession)) + 
+          geom_boxplot() +
+          labs(y="C%", x=NULL) +
+          theme_bw() +
+          theme(legend.position="none") +
+          geom_text (data = PH_C_percentage.L.df, aes(y=9, label = letters), size =4)  +
+          theme(plot.title = element_text(hjust = 0.5)) +
+          ylim(0, NA) 
+plot(bp.succession.C_percentage)
+ggsave2(filename= "plot succession.C_percentage.png", plot = bp.succession.C_percentage, device = "png", width=5, height=4)
+
+#VH: CN_ratio
+bp.succession.CN_ratio <- ggplot(data= df_abiotic, aes(x=succession, y=CN_ratio, fill = succession)) + 
+          geom_boxplot() +
+          labs(y="C:N ratio", x=NULL) +
+          theme_bw() +
+          theme(legend.position="none") +
+          geom_text (data = PH_CN_ratio.L.df, aes(y=24, label = letters), size =4)  +
+          theme(plot.title = element_text(hjust = 0.5))+
+          ylim(0, NA) 
+plot(bp.succession.CN_ratio)
+ggsave2(filename= "plot succession.CN_ratio.png", plot = bp.succession.CN_ratio, device = "png", width=5, height=4)
+
+```
+
+
+# PCA of abiotics
+
+```{r PCA} 
+
+##Perform a PCA on the abiotic soil data
+rownames(df_abiotic) <- df_abiotic$short_line #needed to have individual sample labels in plot
+df_abiotic_PCA <- df_abiotic[,c("SOM", "PO4", "C_percentage", "N_percentage")]
+names(df_abiotic_PCA)[names(df_abiotic_PCA) == "C_percentage"] <- "C%" #to change variable label in plot
+names(df_abiotic_PCA)[names(df_abiotic_PCA) == "N_percentage"] <- "N%" #to change variable label in plot
+names(df_abiotic_PCA)[names(df_abiotic_PCA) == "PO4"] <- "PO[4]-P" #to change variable label in plot
+PCA_abiotic <- PCA(df_abiotic_PCA, scale.unit=T)
+
+## Diagnostic plots of PCA (eigenvalues, contributions etc)
+
+# Extract the eigenvalues and write as table
+eigenvalues <- PCA_abiotic$eig
+PCA_abiotic.eigenvalues <- data.frame(eigenvalues)
+# Add column with rownames
+PCA_abiotic.eigenvalues <- tibble::rownames_to_column(PCA_abiotic.eigenvalues, "component")
+write_xlsx(PCA_abiotic.eigenvalues, "PCA.eigenvalues_abiotic.xlsx")
+PCA_abiotic.eigenvalues
+#eigenvalues larger than 1 indicate they explain more variation than a variable
+
+## Make a screeplot and save
+PCA_abiotic.screeplot <- fviz_eig(PCA_abiotic, addlabels = TRUE, ylim = c(0, 80))
+plot(PCA_abiotic.screeplot)
+ggsave2(filename= "PCA.screeplot_abiotic.png", plot = PCA_abiotic.screeplot, device = "png",
+        width=7, height=4)
+#ylim manually set, depends on data
+
+# Make a variable corr plot showing how abiotic factors contribute to component 1 and 2 and save
+PCA_abiotic.varcorr <- fviz_pca_var(PCA_abiotic, col.var="contrib", repel = TRUE)
+plot (PCA_abiotic.varcorr)
+ggsave2(filename= "PCA.varcorr_abiotic.png", plot = PCA_abiotic.varcorr, device = "png",
+        width=7, height=4)
+
+#Make a corrplot showing how abiotic factors contribute to the four components and save
+var <- get_pca_var(PCA_abiotic)
+corrplot(var$contrib, is.corr=FALSE)
+
+
+# Make a table  showing how abiotic factors contribute to the four components and save
+PCA_abiotic.var <- get_pca_var(PCA_abiotic)
+PCA_abiotic.varcont <- as.data.frame(PCA_abiotic.var[["contrib"]])
+PCA_abiotic.varcont
+PCA_abiotic.varcont <- tibble::rownames_to_column(PCA_abiotic.varcont, "soil factor")
+write_xlsx(PCA_abiotic.varcont, "PCA.varcont_abiotic.xlsx")
+```
+
+```{r overall PCA plots}
+
+#Plot of PC1 vs PC2 colored by succession
+fviz_pca_ind(PCA_abiotic,
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$succession, levels = succ_order), 
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "succession",
+             title = 'PCA of abiotic factors by succession')
+ggsave2(filename= "PCA.PC1vsPC2.succession_abiotic.png", device = "png", width=7, height=4)
+
+#Plot of PC1 vs PC2 colored by field
+fviz_pca_ind(PCA_abiotic,
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$field, levels = field_order),
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "field",
+             title = 'PCA of abiotic factors by field')
+ggsave2(filename= "PCA.PC1vsPC2.field_abiotic.png", device = "png", width=7, height=4)
+
+
+#Plot of PC1 vs PC3 colored by succession
+fviz_pca_ind(PCA_abiotic, axes = c(1,3),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$succession, levels = succ_order), 
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "succession",
+             title = 'PCA of abiotic factors by succession')
+ggsave2(filename= "PCA.PC1vsPC3.succession_abiotic.png", device = "png", width=7, height=4)
+
+#Plot of PC1 vs PC3 colored by field
+fviz_pca_ind(PCA_abiotic, axes = c(1,3),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$field, levels = field_order), 
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "field",
+             title = 'PCA of abiotic factors by field')
+ggsave2(filename= "PCA.PC1vsPC3.field_abiotic.png", device = "png", width=7, height=4)
+
+#Plot of PC2 vs PC3 colored by succession
+fviz_pca_ind(PCA_abiotic, axes = c(2,3),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$succession, levels = succ_order), 
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "succession",
+             title = 'PCA of abiotic factors by succession')
+ggsave2(filename= "PCA.PC2vsPC3.succession_abiotic.png", device = "png", width=7, height=4)
+
+#Plot of PC2 vs PC3 colored by field 
+fviz_pca_ind(PCA_abiotic, axes = c(2,3),
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$field, levels = field_order), 
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             legend.title = "field",
+             title = 'PCA of abiotic factors by field')
+ggsave2(filename= "PCA.PC2vsPC3.field_abiotic.png", device = "png", width=7, height=4)
+
+```
+
+```{r PCA plots manuscript}
+
+## Only use PC1 vs PC2
+
+#biplot using color and shape for succession and included variable arrows 
+fviz_pca_biplot(PCA_abiotic,
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$succession, levels = succ_order), 
+             addEllipses = TRUE,
+             ellipse.type = "confidence",
+             title = 'PCA of abiotic factors',
+             ggtheme = theme_bw(),
+             legend.title = "succession class",
+             col.var = "grey33", repel = TRUE) + 
+        scale_shape_manual(values = c(19, 17, 15, 8)) +
+        xlab("PC1 (62.3%)") + ylab("PC2 (20.8%)")  +
+        theme(plot.title = element_text(hjust = 0.5))
+ggsave2(filename= "PCA.gg4.PC1vsPC2.succession_abiotic.png", device = "png", width=7, height=4)
+ggsave2(filename= "PCA.gg4.alt.PC1vsPC2.succession_abiotic.png", device = "png", width=8, height=4) #VH alt size
+
+
+          scale_x_discrete(labels=c('agricultural', 'mid succession', 'late succession', 'road verge'))
+
+# individual plot per field, color and shape for succession 
+fviz_pca_ind(PCA_abiotic,
+             geom.ind = "point", # show points only (nbut not "text")
+             col.ind = factor(extradata$field, levels = field_order),
+             addEllipses = TRUE, 
+             ellipse.type= "confidence", 
+             title = 'PCA of abiotic factors by field',
+             ggtheme = theme_bw(),
+             legend.title = "succession class") + 
+        scale_shape_manual(values = c(19, 19, 17, 17, 17, 15, 15, 15, 15, 8, 8)) +
+        scale_colour_manual(values = c("#F8766D","#F8766D","#7CAE00","#7CAE00","#7CAE00",
+                                       "#00BFC4","#00BFC4","#00BFC4","#00BFC4","#C77CFF","#C77CFF")) +
+        xlab("PC1 (62.3%)") + ylab("PC2 (20.8%)")  +
+        theme(plot.title = element_text(hjust = 0.5))
+ggsave2(filename= "PCA.gg2.PC1vsPC2.field_abiotic.png", device = "png", width=7, height=4)
+
+
+
+```
+
+# MANOVA
+
+```{r MANOVA pre-work}
+
+rownames(df_abiotic) <- df_abiotic$short_line #needed to have individual sample labels in plot
+df_abiotic_MAN <- df_abiotic[,c("succession", "field", "short_line","SOM", "PO4", "C_percentage", "N_percentage")]
+
+##Assumptions and preliminary tests
+
+#1 Adequate sample size (nr obs should be > nr variables) & independence of obserations
+summary.succession[,1:2] #(5 samples (agri) > 4 variables (5 minus CN ratio))
+
+#2 Absence of univariate outliers
+outlier_PO4 <- df_abiotic_MAN %>% group_by(succession) %>% identify_outliers(PO4) 
+outlier_SOM <- df_abiotic_MAN %>% group_by(succession) %>% identify_outliers(SOM)
+outlier_C_percentage <- df_abiotic_MAN %>% group_by(succession) %>% identify_outliers(C_percentage) 
+outlier_N_percentage<- df_abiotic_MAN %>% group_by(succession) %>% identify_outliers(N_percentage)
+
+#3 Absence of multivariate outliers
+outlier_mult_agri <- mahalanobis_distance(df_abiotic_agri[,6:9]) 
+outlier_mult_mid <- mahalanobis_distance(df_abiotic_mid[,6:9]) 
+outlier_mult_late <- mahalanobis_distance(df_abiotic_late[,6:9])
+outlier_mult_rv <- mahalanobis_distance(df_abiotic_rv[,6:9]) 
+
+#4 Univariate normality
+# Checked in pre-work ANOVA
+
+#5 Multivariate normality 
+nor_mult_agri <- df_abiotic_agri %>% select(SOM, PO4, C_percentage, N_percentage) %>% mshapiro_test() 
+nor_mult_mid <- df_abiotic_mid %>% select(SOM, PO4, C_percentage, N_percentage) %>% mshapiro_test
+nor_mult_late <- df_abiotic_late %>% select(SOM, PO4, C_percentage, N_percentage) %>% mshapiro_test() 
+nor_mult_rv <- df_abiotic_rv %>% select(SOM, PO4, C_percentage, N_percentage) %>% mshapiro_test() 
+
+#6 Absence of multicollinearity (r > 0.9)
+var_cor <- df_abiotic_MAN %>% cor_test(SOM, PO4, C_percentage, N_percentage) 
+
+#7 Homogeneity of variances (Levene's test)
+# Checked in pre-work ANOVA
+
+```
+
+```{r MANOVA}
+
+MAN_model <- lm(cbind(SOM, PO4, C_percentage, N_percentage) ~ succession / field , df_abiotic_MAN) #nested
+MAN <- manova(MAN_model) #R uses Pillai’s Trace test statistic, from base R package stats
+summary(MAN)
+
+capture.output(summary(MAN), file = "MANOVA.txt")
+
+MAN_effect <- eta_squared(MAN)
+MAN_effect  
+
+```
+
+# Linear Discriminant Analysis (= CVA)
+
+```{r LDA}
+
+# Canonical Variates Analysis (CVA) is also referred to in the literature as "Linear Discrimination Analysis" (LDA). Canonical variate analysis is used for analyzing group structure in multivariate data. Canonical variate axes are directions in multivariate space that maximally separate (discriminate) the pre-defined groups of interest specified in the data.
+
+# LDA is used as a post-hoc follow up to see what groups(succession classes in my case) differ most
+
+##LDA has similar assumptions as MANOVA
+#1: Size of smallest group (=5) must be larger than the number of predictor variables
+#2: Multivariate normality: Indepedent variables are normal for each level of the grouping variable (checked when doing nested ANOVA)
+#3: Homogeneity of variance: Variances among group variables are the same across levels of predictors (checked when doing nested ANOVA)
+#4: Multicollinearity: Predictive power decreases with an increased correlation between predictor variables
+#5: Independence
+
+LDA.abiotic <- lda(succession ~ PO4 + SOM + C_percentage + N_percentage, df_abiotic)
+LDA.abiotic 
+capture.output(LDA.abiotic, file = "LDA_abiotic.txt")
+
+```
+
+```{r plotting LDA}
+
+## Prep plotting
+
+#subsetted dataframes with only relevant traits needs to be made and transformed in matrix for calculations of LDs (linear discriminants) or CVs (canonical variates)
+
+keep.LDA <- c("PO4", "SOM", "C_percentage", "N_percentage")
+df_abiotic_LDA <- df_abiotic[keep.LDA]
+df_abiotic_LDA <- as.matrix(df_abiotic_LDA)
+
+#The scaling component gives the coefficients of the CVA that we can use to calculate the "scores" of the observations in the space of the canonical variates (=coefficients of linear discriminants, LD 1 - 3)
+
+LDA.abiotic$scaling
+
+# calculate CV scores
+abiotic.LDA.scores <- df_abiotic_LDA %*% LDA.abiotic$scaling
+
+# create data frame with scores, this what is actually plotted along LD1 (=CV1), LD2 or LD3, coordinates of data points
+abiotic.LD <- data.frame(abiotic.LDA.scores)
+abiotic.LD$succession <- df_abiotic$succession
+
+
+## Plotting 
+
+#plotting LD1
+abiotic.LD1 <- ggplot(abiotic.LD , aes(x = LD1)) + 
+                    geom_density(aes(color=succession, fill = succession), alpha = 0.1) + 
+                    labs(x = "LD1 (86.7%)", y = "normalised density") +
+                    guides(color = guide_legend(title = "succession class"), fill = guide_legend(title = "succession class")) +
+                    theme_bw() +
+                    geom_vline(xintercept = -5.81, linetype= "dashed", color = "#F8766D", size = 0.5) +
+                    geom_vline(xintercept = -5.73, linetype= "dashed", color = "#7CAE00", size = 0.5) +
+                    geom_vline(xintercept = -2.10, linetype= "dashed", color = "#00BFC4", size = 0.5) +
+                    geom_vline(xintercept = -3.32, linetype= "dashed", color = "#C77CFF", size = 0.5) +
+                    annotate("text", x = -0.25, y = 0.7, label = "succession, F(12,117) = 8.5073, P < 0.001***", hjust = 1, size = 3) +
+                    annotate("text", x = -0.25, y = 0.65, label = "succession:site, F(28,160) = 4.2758, P < 0.001***", 
+                             hjust = 1, size = 3) 
+abiotic.LD1  
+ggsave2(filename= "LDA.LD1.png", device = "png", width=7, height=4)  
+ggsave2(filename= "LDA.LD1.alt.png", device = "png", width=5, height=4)  
+
+``` 

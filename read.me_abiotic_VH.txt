@@ -1,0 +1,9 @@
+# Abiotic
+Analysis of soil abiotic factors (PO4, SOM, C%, N% and CN) through ANOVA + Tukey post hoc, PCA, MANOVA and LDA
+
+Input files 
+# abiotic_data_VH.csv (abiotic data)
+# extradata_all_VH.csv (meta data; sample information such as succession and field)
+
+RMarkdown
+# Abiotic analysis VH.rmd
