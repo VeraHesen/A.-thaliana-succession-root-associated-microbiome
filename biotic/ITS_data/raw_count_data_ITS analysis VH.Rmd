@@ -1,0 +1,286 @@
+---
+title: "raw_count_data_ITS analysis VH20230623"
+author: "Vera Hesen"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r starting information}
+
+# Input
+## raw_count_data_16S_VH.csv raw counts ASV table
+## extradata_16S_VH.csv metadata
+
+# Output
+## Rarefaction curve
+## Rarefaction
+## Alpha diversity
+
+#NOTE: Sample V60 V61 V62 (REIJ456) are removed leaving 51 samples
+
+#NOTE: Here output of PIPITS is used, OTU (with 97% similarity)
+
+```
+
+#Package and data set loading
+
+```{r loading required packages}
+
+library(knitr)
+library(dplyr)
+library(ggplot2)
+library(vegan)
+library(GUniFrac)
+library(tibble)
+library(car)
+library(multcompView)
+
+```
+
+```{r loading required data sets}
+
+## From all data sets, V60 V61 V62 (REIJ456) are removed
+
+# Load raw count data
+un_normdf <- data.frame(read.csv("raw_count_data_ITS_VH.csv", header = TRUE, stringsAsFactors=F))
+
+un_normdf <- select(un_normdf, !c("V60", "V61", "V62"))
+
+# Load meta data
+extradata <- data.frame(read.csv("extradata_ITS_VH.csv", header = TRUE, sep = ";"))
+
+extradata <- subset(extradata, !sample.code == "V60")
+extradata <- subset(extradata, !sample.code == "V61")
+extradata <- subset(extradata, !sample.code == "V62")
+
+# rename succession stages
+extradata[extradata == "mid"] <- "mid succession"
+extradata[extradata == "late"] <- "late succession"
+extradata[extradata == "roadverge"] <- "road verge"
+extradata$succession <- factor(extradata$succession, levels = c('agricultural', 
+                                                                'mid succession', 'late succession', 'road verge'))
+
+# specify the order of successional stages and fields based on age
+succ_order <- c('agricultural', 'mid succession', 'late succession', 'road verge')
+field_order <- c('AR1', 'AR3', 'OR', 'REIJ', 'TW1', 'MO', 'NR', 'MV', 'DK', 'AR2', 'TW2')
+
+```
+
+
+# Raw read count
+
+```{r counts of reads and OTUs}
+
+## counts per sample
+counts <- as.data.frame(colSums(un_normdf[, 9:59]))
+names(counts)[names(counts) == "colSums(un_normdf[, 9:59])"] <- "total_nr_reads"
+
+#Sample V82 has to be removed as it did not give any reads
+counts <- tibble::rownames_to_column(counts, "sample")
+counts <- subset(counts, !sample == "V92")
+
+min_count <- min(counts$total_nr_reads)
+max_count <- max(counts$total_nr_reads)
+
+#mean and sd per sample
+mean_count <- mean(counts$total_nr_reads)
+sd_count <- sd(counts$total_nr_reads)
+se_count <- sd_count / (sqrt(length(counts$total_nr_reads)))
+
+#number of OTUs
+nr_OTU_count <- nrow(un_normdf)
+
+#for capturing output
+min_count.T <- paste("min count", min_count)
+max_count.T <- paste("max count", max_count)
+mean_count.T <- paste("mean count", mean_count)
+sd_count.T <- paste("sd count", sd_count)
+se_count.T <- paste("se count", se_count)
+nr_OTU_count.T <- paste("nr OTU count", nr_OTU_count)
+
+capture.output(mean_count.T, sd_count.T, se_count.T, min_count.T, max_count.T, nr_OTU_count.T, file = "ITS_summary_reads.txt")
+
+```
+
+```{r SD limits}
+
+# Calculate limits to read numbers by determining mean +/- 2SD
+SD2 <- sd_count *2
+max_limit <- mean_count + SD2
+min_limit <- mean_count - SD2
+
+max_limit
+min_limit
+
+```
+
+```{r barplot of read count}
+
+counts <- cbind(counts, extradata$code)
+names(counts)[names(counts) == "extradata$code"] <- "sample_code"
+
+bar.counts <- ggplot(data = counts, aes(y =total_nr_reads, x = sample_code)) +
+  geom_bar(stat="identity", fill = "grey", alpha = 0.5) + 
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+  scale_y_continuous(labels = scales::comma) +
+  ggtitle("ITS reads") +
+  ylab("number of reads") +
+  xlab("sample") + 
+  geom_hline(yintercept = min_count, linetype = "dashed") +  # min value
+  geom_hline(yintercept = mean_count, linetype = "dashed") + # mean value
+  geom_hline(yintercept = 10000, linetype = "dashed", colour = "red") + #'golden' value 
+  geom_hline(yintercept = max_limit, linetype = "dashed", colour = "blue") + #max limit 2SD
+  geom_hline(yintercept = min_limit, linetype = "dashed", colour = "blue") #max limit 2SD
+
+bar.counts
+ggsave(filename= "ITS_bar.counts.png", device = "png", width=8, height=4)
+
+```
+
+
+# Rarify
+
+```{r prep dataframe for rarification}
+
+# work with samples in rows and without classification information
+
+un_normdf_select <- un_normdf
+rownames(un_normdf_select) <- un_normdf_select[,1] #OTU as row name
+un_normdf_select <- select(un_normdf_select, !c("OTU_number", "Kingdom", "Phylum", "Class", 
+                                                "Order", "Family", "Genus", "Species", "V92")) #also remove V92, no counts
+un_normdf_select.T <- t(un_normdf_select) #transpose
+rownames(un_normdf_select.T) <- extradata$code
+
+```
+
+```{r Rarifaction curve RAW}
+
+#based on raw data
+
+#set png to save rarefaction curve
+png(file="ITS_rarecurve_raw.png", width=1400, height=800)
+
+rarecurve(un_normdf_select.T, step=100, xlab = "number of reads", ylab = "number of observerd OTUs",label = T, col = "black")
+
+#finishing up png
+while (!is.null(dev.list()))  dev.off()
+
+```
+
+```{r Rarify}
+
+
+#Rarefy to min sequence depth
+rarefied.list.min <- Rarefy(un_normdf_select.T, depth = min_count) #min_count 2,000 is smallest library size
+rarefied.min <- as.data.frame(rarefied.list.min$otu.tab.rff)
+
+png(file="ITS_rarecurve_min.png", width=1400, height=800)
+rarecurve(rarefied.min, step=100, xlab = "number of reads", ylab = "number of observerd OTUs",label = T, col = "black")
+while (!is.null(dev.list()))  dev.off()
+
+
+#Rarefy to 'golden' value
+rarefied.list.gold <- Rarefy(un_normdf_select.T, depth = 10000) #golden value set at 10,000 reads
+rarefied.gold <- as.data.frame(rarefied.list.gold$otu.tab.rff)
+
+png(file="ITS_rarecurve_gold.png", width=1400, height=800)
+rarecurve(rarefied.gold, step=100, xlab = "number of reads", ylab = "number of observerd OTUs",label = T, col = "black")
+while (!is.null(dev.list()))  dev.off()
+
+#Continue with golden value for Alpha diversity analysis
+
+```
+
+
+# Alpha diversity
+
+```{r Shannon diversity}
+
+#By rarefying to 10,000 I lose 3 samples
+extradata_alpha <- extradata
+extradata_alpha <- subset(extradata_alpha, !code == "MO_1")
+extradata_alpha <- subset(extradata_alpha, !code == "DK_1")
+extradata_alpha <- subset(extradata_alpha, !code == "AR1_5")
+
+#Calculate Shannon based on gold rarified data
+extradata_alpha$shannon <- diversity(rarefied.gold, index = 'shannon')
+
+write_xlsx(extradata_alpha, "extradata_alpha_ITS.xlsx")
+
+```
+
+
+```{r pre work type-II ANOVA }
+
+## Testing equal variances per succession
+var_alpha <- leveneTest(shannon ~ succession/field, data = extradata_alpha)
+var_alpha #equal variance P = 0.697
+
+## Testing normality
+qqnorm(extradata_alpha$shannon, main='alpha')
+qqline(extradata_alpha$shannon) # left tail skewed
+hist(extradata_alpha$shannon, main='alpha') #long left tail
+ggplot(extradata_alpha, aes(x=shannon, color=succession, fill = succession)) +
+  theme_classic() + 
+  geom_density(alpha=.2)
+nor_alpha <- shapiro.test(extradata_alpha$shannon)
+nor_alpha #p-value = 0.004222, normality absent 
+
+#division data sets per group
+extradata_alpha_agri <- subset(extradata_alpha, succession == "agricultural")
+extradata_alpha_mid <- subset(extradata_alpha, succession == "mid succession")
+extradata_alpha_late <- subset(extradata_alpha, succession == "late succession")
+extradata_alpha_rv <- subset(extradata_alpha, succession == "road verge")
+
+#normality per succession for alapha (not all normal!)
+nor_alpha_agri <- shapiro.test(extradata_alpha_agri$shannon)
+nor_alpha_agri #p-value = 0.7096
+nor_alpha_mid <- shapiro.test(extradata_alpha_mid$shannon)
+nor_alpha_mid #p-value = 0.02292 NOT NORMAL
+nor_alpha_late <- shapiro.test(extradata_alpha_late$shannon)
+nor_alpha_late #p-value = 0.05074
+nor_alpha_rv <- shapiro.test(extradata_alpha_rv$shannon)
+nor_alpha_rv #p-value = 0.2016
+
+```
+
+
+```{r Nested ANOVA succession type II }
+
+# nested ANOVA to account for the field within succession factor
+anova_succ_alpha <- Anova(lm(shannon ~ succession / field, data = extradata_alpha), type = "II")
+anova_succ_alpha
+capture.output(anova_succ_alpha, file = "ITS_alpha.succ_anova.txt")
+
+#post hoc
+anova1_succ_alpha <- aov(shannon ~ succession / field, data = extradata_alpha)
+summary(anova1_succ_alpha)
+PH.alpha<- TukeyHSD(anova1_succ_alpha)
+PH.alpha
+capture.output(PH.alpha, file = "ITS_alpha.succ_PH.txt")
+
+#for plotting
+PH.alpha.L <- multcompLetters(PH.alpha$succession[,4])
+PH.alpha.L.df <- as.data.frame(PH.alpha.L$Letters) 
+names(PH.alpha.L.df)[names(PH.alpha.L.df) == "PH.alpha.L$Letters"] <- "letters"
+PH.alpha.L.df <- tibble::rownames_to_column(PH.alpha.L.df, "succession")
+```
+
+
+```{r plotting alpha diversity}
+
+# plotting alpha diversity by succession
+
+bp.succession.alpha <- ggplot(data= extradata_alpha, aes(x=factor(succession, levels = succ_order), 
+                                                         y=shannon, fill = factor(succession, levels = succ_order))) + 
+          geom_boxplot() +
+          theme_bw() +
+          theme(legend.position="none", axis.title.x=element_blank()) +
+          ylab("Shannons diversity index (H)") +
+          ylim(2.5, 6) +
+          geom_text (data = PH.alpha.L.df, aes(y=6, label = letters), size =4)  #a and b should be swapped, but worry later
+plot(bp.succession.alpha)
+ggsave(filename= "ITS_alpha.succ.png", plot = bp.succession.alpha, device = "png", width=6, height=5) 
+
+```
