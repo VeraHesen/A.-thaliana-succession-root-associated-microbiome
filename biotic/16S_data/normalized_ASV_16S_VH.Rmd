@@ -1,0 +1,400 @@
+---
+title: "normalized_ASV_16S_VH"
+author: "Vera Hesen"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r starting information}
+
+#This script is for analyzing the 16S data of Veluwe samples (missing sample V82)
+
+# Input: 
+## CSS_normalized_ASV_16S_VH
+## extradata_16S_VH
+## raw_count_data_16S_VH
+
+
+##Beta diversity
+#NMDS
+#PERMANOVA (and pairwise)
+#NMDS plots
+
+##10 most abundant OTUs
+#table of 10 ma
+#heat map of 10 ma over succession
+
+##Venn diagrams with overlapping OTUs in succession stages
+
+#NOTE: Sample V60 V61 V62 (REIJ456) are removed
+
+```
+
+#Package and data set loading
+
+```{r loading required packages}
+
+library(knitr)
+library(dplyr)
+library(devtools)
+library(proxy)
+library(tibble)
+library(writexl)
+library(magrittr)
+
+library(ggplot2)
+library(ggrepel)
+library(RColorBrewer)
+library(ggpubr)
+library(cowplot)
+
+library(vegan) #needed for NMDS
+library(pairwiseAdonis) # needed for pairwise adonis (PERMANOVA)
+
+```
+
+```{r loading required data sets}
+
+## From all data sets, V60 V61 V62 (REIJ456) are removed
+
+# load the CSS normalized ASV table, without V82
+df <- data.frame(read.csv("CSS_normalized_ASV_16S_VH.csv", header = TRUE, stringsAsFactors=F, row.names = 1))
+df <- select(df, !c("V60", "V61", "V62"))
+
+# metadata
+extradata <- data.frame(read.csv("extradata_16S_VH.csv", header = TRUE, sep = ";"))
+extradata <- subset(extradata, !sample.code == "V60")
+extradata <- subset(extradata, !sample.code == "V61")
+extradata <- subset(extradata, !sample.code == "V62")
+
+# rename succession stages
+extradata[extradata == "mid"] <- "mid succession"
+extradata[extradata == "late"] <- "late succession"
+extradata[extradata == "roadverge"] <- "road verge"
+
+# specify the order of successional stages and fields based on age
+succ_order <- c('agricultural', 'mid succession', 'late succession', 'road verge')
+field_order <- c('AR1', 'AR3', 'OR', 'REIJ', 'TW1', 'MO', 'NR', 'MV', 'DK', 'AR2', 'TW2')
+
+
+# load raw count data (used for taxonomy of 10 most abundant taxa )
+un_normdf <- data.frame(read.csv("raw_count_data_16S_VH.csv", header = TRUE, stringsAsFactors=F))
+un_normdf <- select(un_normdf, !c("V60", "V61", "V62"))
+
+```
+
+
+# Beta diversity
+
+```{r NMDS}
+
+df_t <- t(df)
+NMDS <- metaMDS(df_t, distance = "bray", k = 3) 
+NMDS.stress <- round(NMDS$stress, digits = 3)
+NMDS.stress      
+
+```
+
+```{r PERMANOVA}
+
+permanova <- adonis2(formula = df_t ~ succession / field, extradata, method = 'bray', by = "term")
+permanova
+
+# Save output permanova in txt file
+capture.output(permanova, file = "NMDS.16S_permanova.txt")
+
+## Pairwise contrast for significant PERMANOVA
+
+# Default settings used except p.adjust.m is BH (Benjamin Hochberg) instead of bonferroni
+permanova.pair <- pairwise.adonis(df_t, extradata$succession, sim.function = 'vegdist', 
+                                  sim.method = 'bray', p.adjust.m = 'BH')
+permanova.pair
+
+# Save output pairwise permanova in txt file
+write_xlsx(permanova.pair, "NMDS.16S_permanova_pairwise.xlsx")
+
+```
+
+```{r NMDS plots }
+
+# prepare a plot for NMDS, colour by succession
+datascores <- as.data.frame(scores(NMDS)$sites)  #extract the site scores
+scores <- cbind(as.data.frame(datascores), Succession = extradata$succession, Field = extradata$field)
+scores$Succession <- as.factor(scores$Succession)
+centroids <- aggregate(cbind(NMDS1, NMDS2) ~ Succession, data = scores, FUN = mean)
+seg <- merge(scores, setNames(centroids, c('Succession','oNMDS1','oNMDS2')),
+             by = 'Succession', sort = FALSE)
+centroids_f <- aggregate(cbind(NMDS1,  NMDS2) ~ Field, data = scores, FUN = mean)
+centroids_f$Succession <- c("agricultural","road verge", "agricultural","late succession","late succession","late succession","late succession", "mid succession", "mid succession", "mid succession","road verge")
+#addition of succession info to field, in alphabactical order of field
+centroids_f$Succession <- as.factor(centroids_f$Succession)
+seg_f <- merge(scores, setNames(centroids_f, c('Field', 'oNMDS1', 'oNMDS2')),
+               by = 'Field', sort = FALSE)
+
+# plot coloured on succession   
+ggplot(scores, aes(x = NMDS1, y = NMDS2, colour = factor(Succession, levels = succ_order), 
+                   shape = factor(Succession, levels = succ_order))) +
+  geom_segment(data = seg,
+               mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # add spiders
+  geom_point(data = centroids, size = 4) +                    # add centroids
+  geom_point() +
+  coord_equal() +
+  theme_bw()+ 
+  theme(legend.position="right",legend.text=element_text(size=10),legend.direction='vertical') +
+  guides(color = guide_legend(title = "succession class"), shape = guide_legend(title = "succession class")) +
+  annotate("text", x = -1.5, y = 0.55, label = "succession (F = 3.3146 and P = 0.001***)", hjust = 0, size = 3) +
+  annotate("text", x = -1.5, y = 0.45, label = "succession:site (F = 2.4386 and P = 0.001***)", hjust = 0, size = 3) +
+  scale_shape_manual(values = c(19, 17, 15, 8)) 
+  # position of annotate text is set manually, depends on data
+ggsave2(filename= "NMDS.16S_succession.png", device = "png", width=8, height=4)
+
+# plot with field and succession info
+ggplot(scores, aes(x = NMDS1, y = NMDS2, colour = factor(Succession, levels = succ_order),
+                                                         shape = factor(Succession, levels = succ_order))) +
+  geom_segment(data = seg_f,mapping = aes(xend = oNMDS1, yend = oNMDS2)) + # add spiders
+  geom_point() + # add all data points
+  coord_fixed()+                                              
+  theme_bw()+
+  theme(legend.position="right",legend.text=element_text(size=10),
+        legend.direction='vertical', legend.title = element_blank()) +
+  annotate("text", x = -1.6, y = 0.65, label = "succession (F = 3.3146 and P = 0.001***)", hjust = 0, size = 3) +
+  annotate("text", x = -1.6, y = 0.55, label = "succession:site (F = 2.4386 and P = 0.001***)", hjust = 0, size = 3) +
+  scale_shape_manual(values = c(19, 17, 15, 8)) +
+  geom_point(data = centroids_f, size = 4)
+  # position of annotate text is set manually, depends on data
+ggsave2(filename= "NMDS.16S_fields_succ3.png", device = "png", width=8, height=6)
+
+```
+
+
+
+# 10 most abundant OTUs
+
+```{r table of 10 most abundant OTUs}
+
+## Making a table of the 10 most abundant OTUs 
+# Use df (normalized no tanoxomy) and un_normdf (not normalized but has taxonomy)
+
+# Add column with OTU
+df_extra <- tibble::rownames_to_column(df, "OTU")
+# Add final column with the sum of observations per OTU
+df_extra$Total_norm <- rowSums(df_extra[2:ncol(df_extra)])
+
+# See if df and un_normdf match in OTU
+all(df_extra$OTU == un_normdf$OTU)
+# Full match, all TRUE
+
+# Merge data sets
+df_extra <- cbind(df_extra[, c("OTU", "Total_norm")], un_normdf[ , c("Kingdom", "Phylum", "Class", "Order", "Family", "Genus", "Species")])
+
+#calculate total number of normalized reads in data set
+read_total <- sum(df_extra$Total_norm)
+
+# Order dataframe from highest to lowest total normalized counts
+df_extra <- df_extra[order(df_extra$Total_norm, decreasing = TRUE),]
+#Select top 10 rows, these are 10 most abundant OTUs
+df_extra_ma10 <- df_extra[1:10,]
+df_extra_ma10$perc_reads <- df_extra_ma10$Total_norm / read_total *100
+
+write_xlsx(df_extra_ma10, "16S_10ma.xlsx")
+df_extra_ma10
+
+#Calculate the percentage of norm. reads of 10 ma compared to the total nr of norm. reads
+Total_norm <- sum(df_extra$Total_norm)
+Total_norm_ma10 <- sum(df_extra_ma10$Total_norm)
+perc_ma10 <- (Total_norm_ma10/Total_norm)*100
+perc_ma10 <- round(perc_ma10, digits = 2)
+print(paste(perc_ma10,"% of total normalized reads are normalized reads of the 10 most abundant ITS OTUs"))
+
+capture.output(print(paste(perc_ma10,"% of total normalized reads are normalized reads of the 10 most abundant 16S OTUs")), file = "16S_10ma_perc.txt")
+
+```
+
+```{r heat map 10 ma OTUs - data wrangling}
+
+df_t <- t(df)
+
+#First calculate the total reads per succession class
+df_total <- as.data.frame(df_t)
+df_total$succession <- extradata$succession
+
+df_total_agri <- subset(df_total, succession == "agricultural")
+df_total_agri <- df_total_agri[,!names(df_total_agri) %in% c("succession")] #dropping succession column for calculations
+df_total_agri$sum <- rowSums(df_total_agri) #totals per sample
+read_agri <- sum(df_total_agri$sum) #total of succession class
+
+df_total_mid <- subset(df_total, succession == "mid succession")
+df_total_mid <- df_total_mid[,!names(df_total_mid) %in% c("succession")] #dropping succession column for calculations
+df_total_mid$sum <- rowSums(df_total_mid) #totals per sample
+read_mid <- sum(df_total_mid$sum) #total of succession class
+
+df_total_late <- subset(df_total, succession == "late succession")
+df_total_late <- df_total_late[,!names(df_total_late) %in% c("succession")] #dropping succession column for calculations
+df_total_late$sum <- rowSums(df_total_late) #totals per sample
+read_late <- sum(df_total_late$sum) #total of succession class
+
+df_total_rv <- subset(df_total, succession == "road verge")
+df_total_rv <- df_total_rv[,!names(df_total_rv) %in% c("succession")] #dropping succession column for calculations
+df_total_rv$sum <- rowSums(df_total_rv) #totals per sample
+read_rv <- sum(df_total_rv$sum) #total of succession class
+
+#total_read <- read_agri + read_mid + read_late + read_rv #as a check that the reads add up to total
+
+# Get observations you want (10 ma) and split them per succession stage
+OTU_10ma = (df_extra_ma10$OTU) #extract the 10 most abundant OTUs from the table from previous chunk
+df_10 <- df[OTU_10ma,]
+df_10t <- as.data.frame(t(df_10))
+df_10t$succession <- extradata$succession
+
+df_10t_agri <- subset(df_10t, succession == "agricultural")
+df_10t_mid <- subset(df_10t, succession == "mid succession")
+df_10t_late <- subset(df_10t, succession == "late succession")
+df_10t_rv <- subset(df_10t, succession == "road verge")
+
+total_agri <- as.data.frame(colSums(df_10t_agri[,1:10]))
+names(total_agri)[names(total_agri) == "colSums(df_10t_agri[, 1:10])"] <- "total_reads"
+total_agri <- tibble::rownames_to_column(total_agri, "OTU")
+total_agri$succession <- as.factor("agricultural")
+total_agri$perc_reads <- total_agri$total_reads / read_agri *100
+
+total_mid <- as.data.frame(colSums(df_10t_mid[,1:10]))
+names(total_mid)[names(total_mid) == "colSums(df_10t_mid[, 1:10])"] <- "total_reads"
+total_mid <- tibble::rownames_to_column(total_mid, "OTU")
+total_mid$succession <- as.factor("mid succession")
+total_mid$perc_reads <- total_mid$total_reads / read_mid *100
+
+total_late <- as.data.frame(colSums(df_10t_late[,1:10]))
+names(total_late)[names(total_late) == "colSums(df_10t_late[, 1:10])"] <- "total_reads"
+total_late <- tibble::rownames_to_column(total_late, "OTU")
+total_late$succession <- as.factor("late succession")
+total_late$perc_reads <- total_late$total_reads / read_late *100
+
+total_rv <- as.data.frame(colSums(df_10t_rv[,1:10]))
+names(total_rv)[names(total_rv) == "colSums(df_10t_rv[, 1:10])"] <- "total_reads"
+total_rv <- tibble::rownames_to_column(total_rv, "OTU")
+total_rv$succession <- as.factor("road verge")
+total_rv$perc_reads <- total_rv$total_reads / read_rv *100
+
+#create final df
+total_10ma <- rbind(total_agri, total_mid, total_late, total_rv)
+total_10ma$OTU <- factor(total_10ma$OTU, 
+                             levels = c("OTU_16S_1","OTU_16S_2","OTU_16S_3","OTU_16S_4","OTU_16S_5",
+                                        "OTU_16S_6","OTU_16S_7","OTU_16S_8","OTU_16S_9","OTU_16S_10"))
+
+```
+
+
+```{r heat map 10 ma OTUs - additional taxonomy}
+
+# manual selection of the lowest (max genus, species not used) taxa for each of the 10MA
+# based on df_extra_ma10
+
+OTU1 <- paste(df_extra_ma10$Genus[[1]],"(G.)")
+OTU2 <- paste(df_extra_ma10$Genus[[2]],"(G.)")
+OTU3 <- paste(df_extra_ma10$Family[[3]],"(F.)")
+OTU4 <- paste(df_extra_ma10$Genus[[4]],"(G.)")
+OTU5 <- paste(df_extra_ma10$Order[[5]],"(O.)")
+OTU6 <- paste(df_extra_ma10$Genus[[6]],"(G.)")
+OTU7 <- paste(df_extra_ma10$Genus[[7]],"(G.)")
+OTU8 <- paste(df_extra_ma10$Family[[8]],"(F.)")
+OTU9 <- paste(df_extra_ma10$Family[[9]],"(F.)")
+OTU10 <- paste(df_extra_ma10$Genus[[10]],"(G.)")
+
+OTU_taxa <- rbind(OTU1, OTU2, OTU3, OTU4, OTU5, OTU6, OTU7, OTU8, OTU9, OTU10)
+OTU_taxa #used for the y labels of ggplot
+
+``` 
+
+
+```{r heat map 10 ma OTUs - plotting}
+
+ggplot(total_10ma, aes(x = succession, y = OTU, fill = perc_reads)) + 
+        geom_tile() +
+        scale_y_discrete(limits=rev, labels = rev(c(expression(italic("Bradyrhizobium (G.)")),
+                                                    expression(italic("Pseudarthrobacter (G.)")),
+                                                    expression(italic("Xanthobacteraceae (F.)")),
+                                                    expression(italic("Sphingomonas (G.)" )),
+                                                    expression(italic("Bacillales (O.)" )),
+                                                    expression(italic("Acidothermus (G.)" )),
+                                                    expression(italic("Hyphomicrobium (G.)")),
+                                                    expression(italic("Xanthobacteraceae (F.)")),
+                                                    expression(italic("Planococcaceae (F.)")),
+                                                    expression(italic("Piscinibacter (G.)"))))) +
+        scale_fill_gradient(high = "red", low = "white") +
+        theme_bw() +
+        theme(axis.title.x = element_blank(), axis.title.y = element_blank(), 
+              axis.text.x = element_text(angle = 45, hjust=1)) +
+        guides(fill=guide_colourbar(title="% of reads"))
+
+ggsave2(filename= "16S_10ma_heatmap.png", device = "png", width=4, height=4)      
+ 
+```
+
+# Venn Diagrams
+
+```{r Venn data wrangling}
+
+
+#split dataframes of OTU table per succession by adding extra column
+df_total <- as.data.frame(t(df))
+df_total$succession <- extradata$succession
+
+df_agri <- subset(df_total, succession == "agricultural") 
+df_mid <- subset(df_total, succession == "mid succession") 
+df_late <- subset(df_total, succession == "late succession") 
+df_roadverge <- subset(df_total, succession == "road verge") 
+
+
+#drop column with succession (only used to subset)
+df_agri <- select(df_agri, -c("succession"))
+df_mid <- select(df_mid, -c("succession"))
+df_late <- select(df_late, -c("succession"))
+df_roadverge <- select(df_roadverge, -c("succession"))
+
+#calculate totals of all samples per OTU and add OTU as column (currently only row name)
+df_agri <- as.data.frame(colSums(df_agri))
+df_agri <- tibble::rownames_to_column(df_agri, "OTU")
+
+df_mid <- as.data.frame(colSums(df_mid))
+df_mid <- tibble::rownames_to_column(df_mid, "OTU")
+
+df_late <- as.data.frame(colSums(df_late))
+df_late <- tibble::rownames_to_column(df_late, "OTU")
+
+df_roadverge <- as.data.frame(colSums(df_roadverge))
+df_roadverge <- tibble::rownames_to_column(df_roadverge, "OTU")
+
+#drop all OTUs that have no observations in any of the samples (those have column sum = 0)
+df_agri <- df_agri[apply(df_agri!=0, 1, all),]
+df_mid <- df_mid[apply(df_mid!=0, 1, all),]
+df_late <- df_late[apply(df_late!=0, 1, all),]
+df_roadverge <- df_roadverge[apply(df_roadverge!=0, 1, all),]
+
+
+#create a list with all unique OTUs that occur in any of the samples of a certain succession stage
+agri_OTU <- df_agri$OTU
+mid_OTU <- df_mid$OTU
+late_OTU <- df_late$OTU
+roadverge_OTU <- df_roadverge$OTU
+
+#combine the 4 list of the different succession stages
+list_OTU <- list(agri_OTU, mid_OTU, late_OTU, roadverge_OTU)
+
+```
+
+```{r Venn plotting}
+ 
+if (!require(devtools)) install.packages("devtools")
+devtools::install_github("gaospecial/ggVennDiagram")
+library("ggVennDiagram")
+
+venn1 <- ggVennDiagram(list_OTU, label_alpha = 0,
+              category.names = c("agricultural", "mid succession", 
+                                 "late succession", "road verge")) +
+        scale_fill_gradient(low="white",high = "#8c8c8c") +
+        scale_x_continuous(expand = expansion(mult = .1))
+venn1
+ggsave2(filename= "venn1_16S.png", device = "png", width=6, height=4)
+
+```
+
