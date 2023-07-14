@@ -1,0 +1,295 @@
+---
+title: "normalized_phyla_ITS_VH"
+author: "Vera Hesen"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r starting information}
+
+#This script is for analyzing the ITS data of Veluwe samples (missing sample 92)
+#This script is used to make stacked bar graphs of aggregated taxa
+
+# Input: 
+## CCS_normalized_phyla_ITS_VH.csv 
+## extradata_ITS_VH.csv   
+
+# Output:
+## Overall count phyla
+## Per succession stage count phyla
+## Stacked bar graph phyla level per succession stage and per sample
+
+#NOTE: Samples V60 V61 V62 (REIJ456) are removed prior to analysis because of aberrant soil abiotics
+
+```
+
+#Package and data set loading
+
+```{r loading required packages}
+library(data.table)
+library(ggplot2)
+library(janitor)
+library(dplyr)
+library(cowplot)
+library(car)
+library(writexl)
+
+```
+
+```{r loading required data sets}
+
+# extra data with sample codes and succession stages
+extra_ITS <- read.table("extradata_ITS_VH.csv", sep = ";", header = T)
+extra_ITS$succession <- factor(extra_ITS$succession, levels = c("agricultural", "mid", "late", "roadverge"))
+
+extra_ITS <- subset(extra_ITS, !sample.code == "V60")
+extra_ITS <- subset(extra_ITS, !sample.code == "V61")
+extra_ITS <- subset(extra_ITS, !sample.code == "V62")
+
+
+# aggregated normalized counts per phylum for all 53 samples (ITS missing V92 AR1-3)
+phylum_ITS <- read.csv("CCS_normalized_phyla_ITS_VH.csv")
+phylum_ITS$phylum_name <- gsub("p__","", phylum_ITS$phylum_name) #remove part of phylum name p__ 
+names(phylum_ITS)[names(phylum_ITS) == "phylum_name"] <- "phylum" #rename phylum column to match script
+phylum_ITS <- dplyr::select(phylum_ITS, !c("V60", "V61", "V62"))
+phyla <- phylum_ITS$phylum #Extract all phyla names
+
+```
+
+
+# Phylum level 
+
+```{r setting up overall dataframe}
+
+# prepare phylum aggregated df
+phylum_ITS <- as.data.frame(t(phylum_ITS))
+phylum_ITS <- row_to_names(phylum_ITS, row_number = 1) #add top row as column names
+phylum_ITS <- as.data.frame(sapply(phylum_ITS, as.numeric)) # converts all numbers from character to numeric
+phylum_ITS$sample.code <- extra_ITS$sample.code
+
+# merge extradata and phyla data for df with aggregated counts and extra data
+phylum_ITSE <- merge(extra_ITS , phylum_ITS, by= "sample.code")
+phylum_ITSE$succession <- factor(phylum_ITSE$succession, levels = c("agricultural", "mid", "late", "roadverge"))
+phylum_ITSE$field <- factor(phylum_ITSE$field,levels = c('AR1', 'AR3', 'OR', 'REIJ', 'TW1', 'MO', 'NR', 'MV', 'DK', 'AR2', 'TW2'))
+
+#write_xlsx(phylum_ITSE, "phylum_ITSE.xlsx")
+
+```
+
+## Per succession stage df and plotting
+
+```{r phylum counts overall data}
+
+phylum_ITS_count <- phylum_ITS
+phylum_ITS_count <- column_to_rownames(phylum_ITS_count, var="sample.code")
+phylum_ITS_count <- as.data.frame(t(phylum_ITS_count))
+
+phylum_ITS_count$total <- rowSums(phylum_ITS_count) #total nr of norm counts per phylum
+phylum_ITS_count_total <- sum(phylum_ITS_count$total) #total nr of norm counts for whole data set of phyla
+phylum_ITS_count$totalp <- phylum_ITS_count$total / phylum_ITS_count_total  * 100 #percentage of norm counts 
+
+phylum_ITS_count$phylum <- row.names(phylum_ITS_count)
+phylum_ITS_count <- select(phylum_ITS_count, c("totalp", "phylum")) #final df for whole data set phyla
+
+```
+
+```{r phylum counts per succession stage}
+
+# for stacked bar graph visualize this per succession stage, therefore I wrangle data per succession stage
+
+# Steps to take: split df, remove unnecessary columns, transpose, calculate total and total%, merge dfs again
+
+## agri
+phylum_ITS_agri <- subset(phylum_ITSE, succession == "agricultural") 
+phylum_ITS_agri <- subset(phylum_ITS_agri, select = -c(1:6) ) 
+phylum_ITS_agri <- as.data.frame(t(phylum_ITS_agri))
+phylum_ITS_agri$total <- rowSums(phylum_ITS_agri) #total nr of norm counts per phylum
+phylum_ITS_agri_total <- sum(phylum_ITS_agri$total) #total nr of norm counts for agri
+phylum_ITS_agri$totalp <- phylum_ITS_agri$total / phylum_ITS_agri_total  * 100 #percentage of norm counts 
+phylum_ITS_agri$succession <- "agri" #indicates succession stage for this df
+phylum_ITS_agri$phylum <- row.names(phylum_ITS_agri)
+phylum_ITS_agri <- select(phylum_ITS_agri, c("totalp", "succession", "phylum")) #final df for agri
+
+## mid
+phylum_ITS_mid <- subset(phylum_ITSE, succession == "mid")
+phylum_ITS_mid <- subset(phylum_ITS_mid, select = -c(1:6) )
+phylum_ITS_mid <- as.data.frame(t(phylum_ITS_mid))
+phylum_ITS_mid$total <- rowSums(phylum_ITS_mid) #total nr of norm counts per phylum
+phylum_ITS_mid_total <- sum(phylum_ITS_mid$total) #total nr of norm counts for mid
+phylum_ITS_mid$totalp <- phylum_ITS_mid$total / phylum_ITS_mid_total  * 100 #percentage of norm counts 
+phylum_ITS_mid$succession <- "mid" #indicates succession stage for this df
+phylum_ITS_mid$phylum <- row.names(phylum_ITS_mid)
+phylum_ITS_mid <- select(phylum_ITS_mid, c("totalp", "succession", "phylum")) #final df for mid
+
+## late
+phylum_ITS_late <- subset(phylum_ITSE, succession == "late")
+phylum_ITS_late <- subset(phylum_ITS_late, select = -c(1:6) )
+phylum_ITS_late <- as.data.frame(t(phylum_ITS_late))
+phylum_ITS_late$total <- rowSums(phylum_ITS_late) #total nr of norm counts per phylum
+phylum_ITS_late_total <- sum(phylum_ITS_late$total) #total nr of norm counts for late
+phylum_ITS_late$totalp <- phylum_ITS_late$total / phylum_ITS_late_total  * 100 #percentage of norm counts 
+phylum_ITS_late$succession <- "late" #indicates succession stage for this df
+phylum_ITS_late$phylum <- row.names(phylum_ITS_late)
+phylum_ITS_late <- select(phylum_ITS_late, c("totalp", "succession", "phylum")) #final df for late
+
+## roadverge
+phylum_ITS_rv <- subset(phylum_ITSE, succession == "roadverge")
+phylum_ITS_rv <- subset(phylum_ITS_rv, select = -c(1:6) )
+phylum_ITS_rv <- as.data.frame(t(phylum_ITS_rv))
+phylum_ITS_rv$total <- rowSums(phylum_ITS_rv) #total nr of norm counts per phylum
+phylum_ITS_rv_total <- sum(phylum_ITS_rv$total) #total nr of norm counts for rv
+phylum_ITS_rv$totalp <- phylum_ITS_rv$total / phylum_ITS_rv_total  * 100 #percentage of norm counts 
+phylum_ITS_rv$succession <- "roadverge" #indicates succession stage for this df
+phylum_ITS_rv$phylum <- row.names(phylum_ITS_rv)
+phylum_ITS_rv <- select(phylum_ITS_rv, c("totalp", "succession", "phylum")) #final df for roadverge
+
+# Combine the 4 succession data frames by row
+phylum_ITS_counts <- rbind(phylum_ITS_agri, phylum_ITS_mid, phylum_ITS_late, phylum_ITS_rv)
+phylum_ITS_counts$succession <- factor(phylum_ITS_counts$succession, 
+                                       levels = c("agri", "mid", "late", "roadverge"))
+phylum_ITS_counts$phylum <- factor(phylum_ITS_counts$phylum)
+
+# Now this dataframe has %counts per phyla for each succession stage separately
+```
+
+```{r wrangling df to fit plots}
+
+# The data has to be wrangled in order to give an informative plot
+## Step 1: only select highly abundant (>2%) phyla to be shown
+## Step 2: account for the low abundant phyla as missing percentage in plot
+## Step 3: order phyla to abundance (default is alphabetic)
+
+
+## Step 1: only select highly abundant (>2%) phyla to be shown
+# First check which phyla have more than 2% abundance
+phylum_ITS_top <- subset(phylum_ITS_counts, totalp >= 2)
+phylum_ITS_top$phylum <- factor(phylum_ITS_top$phylum)
+levels(phylum_ITS_top$phylum)
+#with cutoff 2%: Ascomycota, Basidiomycota, Mortierellomycota, unidentified
+# Second, only keep the highly abundant (>2%) in df
+phylum_ITS_counts = subset(phylum_ITS_counts, phylum == "Ascomycota" | phylum == "Basidiomycota" | 
+                             phylum == "Mortierellomycota" | phylum == "unidentified")
+
+## Step 2: account for the low abundant phyla as missing percentage in plot
+# First, check how much percentage is accounted for with the high abundant phyla of step 1 and make df
+phylum_ITS_la <- aggregate(phylum_ITS_counts$totalp, by=list(Category=phylum_ITS_counts$succession), FUN=sum)
+# Second, determine what percentage is low abundant (100 - high abundant)
+phylum_ITS_la$totalp <- 100 - phylum_ITS_la$x
+# Thirdly, wrangle low abundant df to fit structure of the count df
+names(phylum_ITS_la)[names(phylum_ITS_la) == "Category"] <- "succession"
+phylum_ITS_la$phylum <- "Low abundant phyla (<2%)"
+phylum_ITS_la <- select(phylum_ITS_la, c("totalp", "succession", "phylum"))
+#Fourthly, bind the phylum count df with the low abundant count df
+phylum_ITS_counts <- rbind(phylum_ITS_counts, phylum_ITS_la)
+
+## Step 3: order phyla to abundance (default is alphabetic)
+phylum_ITS_counts$phylum <- factor(phylum_ITS_counts$phylum, levels = c("Low abundant phyla (<2%)", 
+                                                                        "Mortierellomycota", "unidentified",
+                                                                        "Basidiomycota", "Ascomycota"))
+
+```
+
+```{r plotting stacked bar graph}
+
+phyla_ITS_totalp <- ggplot(phylum_ITS_counts,aes(fill=phylum, y=totalp, x=succession)) + 
+                    geom_bar(position="stack", stat="identity") +
+                    theme_cowplot(font_size= 12, rel_tiny = 0.5, rel_large = 1.5) +
+                    ylab("% of total normalized counts") +
+                    xlab("Succession stage") +
+                    ylim(0,100) +
+                    scale_fill_brewer(palette="Dark2") +
+                    scale_x_discrete(labels=c('agricultural', 'mid succession', 'late succession', 'road verge')) +
+                    theme(axis.text.x = element_text(angle = 45, hjust=1), axis.title.x=element_blank())
+phyla_ITS_totalp
+ggsave2(filename= "Phyla abundance ITS.png", device = "png", width=5, height=4)
+
+```
+
+```{r counts most abundant phyla}
+
+#Depends on chunk 6 'phylum counts overall data'
+
+Ascomycota <- phylum_ITS_count[phylum_ITS_count$phylum == 'Ascomycota', 1]
+Basidiomycota <- phylum_ITS_count[phylum_ITS_count$phylum == 'Basidiomycota', 1]
+Mortierellomycota <- phylum_ITS_count[phylum_ITS_count$phylum == 'Mortierellomycota', 1]
+
+```
+
+## Per sample plotting
+
+```{r wrangling data per sample}
+
+#I am only interested in top 5 phyla and rest is Low abundant phyla (<5%)
+
+## Ascomycota
+phylum_ITSE_1 <- phylum_ITSE[ , c("succession", "code", "Ascomycota")]    
+phylum_ITSE_1$phylum <- "Ascomycota"
+names(phylum_ITSE_1)[names(phylum_ITSE_1) == "Ascomycota"] <- "value"
+
+## Basidiomycota
+phylum_ITSE_2 <- phylum_ITSE[ , c("succession", "code", "Basidiomycota")]    
+phylum_ITSE_2$phylum <- "Basidiomycota"
+names(phylum_ITSE_2)[names(phylum_ITSE_2) == "Basidiomycota"] <- "value"
+
+## unidentified
+phylum_ITSE_3 <- phylum_ITSE[ , c("succession", "code", "unidentified")]    
+phylum_ITSE_3$phylum <- "Unidentified"
+names(phylum_ITSE_3)[names(phylum_ITSE_3) == "unidentified"] <- "value"
+
+## Mortierellomycota
+phylum_ITSE_4 <- phylum_ITSE[ , c("succession", "code", "Mortierellomycota")]    
+phylum_ITSE_4$phylum <- "Mortierellomycota"
+names(phylum_ITSE_4)[names(phylum_ITSE_4) == "Mortierellomycota"] <- "value"
+
+
+# Calculate total number for low abundant phyla
+phylum_ITSE_r <- subset(phylum_ITSE, select = -c(Mortierellomycota, unidentified, 
+                                                 Basidiomycota, Ascomycota)) 
+phylum_ITSE_r$low_abundant <- rowSums(phylum_ITSE_r[7:15]) #sum all phyla except above 4
+phylum_ITSE_r <- phylum_ITSE_r[ , c("succession", "code", "low_abundant")]    
+phylum_ITSE_r$phylum <- "Low abundant phyla (<2%)"
+names(phylum_ITSE_r)[names(phylum_ITSE_r) == "low_abundant"] <- "value"
+
+
+#Create the overall data frame
+
+phylum_ITS_counts.sample <- rbind(phylum_ITSE_1, phylum_ITSE_2, phylum_ITSE_3, phylum_ITSE_4,
+                                  phylum_ITSE_r)
+
+
+# order phyla to abundance (default is alphabetic)
+phylum_ITS_counts.sample$phylum <- factor(phylum_ITS_counts.sample$phylum, 
+                                          levels = c("Low abundant phyla (<2%)",
+                                                                        "Mortierellomycota",
+                                                                      "Unidentified",
+                                                                        "Basidiomycota",
+                                                                      "Ascomycota"))
+
+#rename succession stages before plotting
+levels(phylum_ITS_counts.sample$succession)[levels(phylum_ITS_counts.sample$succession)=="mid"] <- "mid succession"
+levels(phylum_ITS_counts.sample$succession)[levels(phylum_ITS_counts.sample$succession)=="late"] <- "late succession"
+levels(phylum_ITS_counts.sample$succession)[levels(phylum_ITS_counts.sample$succession)=="roadverge"] <- "road verge"
+levels(phylum_ITS_counts.sample$succession)[levels(phylum_ITS_counts.sample$succession)=="agricultural"] <- "agri"  #because agricultural does not fit plot nicely
+
+```
+
+```{r plotting stacked bar graph PER SAMPLE}
+
+phyla_ITS_totalp.s <- ggplot(phylum_ITS_counts.sample,aes(fill=phylum, y=value, x = code)) + 
+                    geom_bar(position="fill", stat="identity") +
+                    theme_cowplot(font_size= 12, rel_tiny = 0.5, rel_large = 1.5) +
+                    ylab("fraction of total normalized counts") +
+                    scale_fill_brewer(palette="Dark2", labels = c("Low abundant phyla (<2%)",
+                                                  expression(italic("Mortierellomycota")),
+                                                  "Unidentified",
+                                                  expression(italic("Basidiomycota")),
+                                                  expression(italic("Ascomycota")))) +
+                    theme(axis.text.x = element_blank(), axis.title.x=element_blank(),
+                          axis.ticks.x=element_blank(), legend.text.align = 0) +
+                   facet_grid(~succession, scales = "free_x", space = "free_x") 
+
+
+phyla_ITS_totalp.s
+ggsave2(filename= "Phyla abundance ITS per sample.png", device = "png", width=8, height=4)
+
+```
