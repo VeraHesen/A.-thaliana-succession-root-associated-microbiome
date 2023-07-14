@@ -1,6 +1,7 @@
 # A.-thaliana-succession-root-associated-microbiome
 
-Data analysis associated with the paper "Pioneer Arabidopsis thaliana spans the succession gradient revealing a diverse root-associated microbiome" (Hesen et al., 2023)
+Data analysis associated with the paper "Pioneer Arabidopsis thaliana spans the succession gradient revealing a diverse root-associated microbiome" (Hesen et al., 2023, Environmental Microbiome, DOI: 10.1186/s40793-023-00511-y). Raw 16S and ITS sequence data is deposited in European Nucleotide Archive (ENA) under accession PRJEB59993.
+
 RMarkdown files are provided to process the abiotic and biotic data. Input files are provided per section
 
 # Abiotic
