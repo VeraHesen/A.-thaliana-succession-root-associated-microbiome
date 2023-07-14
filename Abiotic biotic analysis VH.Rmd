@@ -1,0 +1,300 @@
+---
+title: "Abiotic biotic analysis - VH 20230623"
+author: "Vera Hesen"
+date: "2023-06-23"
+output: html_document
+---
+
+```{r starting information}
+
+# Input:
+## abiotic_data_VH.csv
+## extradata_all_VH.csv
+## CSS_normalized_ASV_table_16S_VH.csv
+## CCS_normalized_OTU_table_ITS_VH.csv
+
+# Output:
+## Mantel test 16S with abiotic 
+## Mantel test ITS with abiotic 
+## Mantel test 16S with ITS 
+## CCA (canonical correspondance analysis) 16S with abiotic 
+## CCA (canonical correspondance analysis) ITS with abiotic
+
+#NOTE: Samples REIJ4, REIJ5 and REIJ6 have been removed from the data analysis
+
+```
+
+#Package and data set loading
+
+```{r loading required packages}
+
+library(knitr)
+library(data.table)
+library(writexl)
+library(ggplot2)
+library(ggrepel)
+library(vegan)
+
+```
+
+```{r loading required data sets}
+
+#16S CSS normalized ASV table, without V82
+df_16S <- data.frame(read.csv("CSS_normalized_ASV_table_16S_VH.csv", header = TRUE, stringsAsFactors=F, row.names = 1))
+
+#ITS CCS normalized ASV table, without V92
+df_ITS <- data.frame(read.csv("CSS_normalized_OTU_table_ITS_VH.csv", header = TRUE, stringsAsFactors = F, row.names = 1))
+
+#Abiotic data, with all samples
+df_abiotic <- data.frame(read.csv("abiotic_data_VH.csv", header = TRUE, stringsAsFactors = F, sep = ","))
+
+df_abiotic[df_abiotic == "agri"] <- "agricultural"
+df_abiotic[df_abiotic == "mid"] <- "mid succession"
+df_abiotic[df_abiotic == "late"] <- "late succession"
+df_abiotic[df_abiotic == "road verge"] <- "road verge"
+df_abiotic$succession <- factor(df_abiotic$succession, levels = c("agricultural","mid succession",
+                                                                  "late succession", "road verge"))
+
+
+# Open file with extra data like succession and field with all samples 
+extradata <- data.frame(read.csv("extradata_all_VH.csv", header = TRUE, sep = ";"))
+extradata <- extradata[,c(1:6)]
+
+succ_order <- c('agricultural', 'mid succession', 'late succession', 'road verge')
+field_order <- c('AR1', 'AR3', 'OR', 'REIJ', 'TW1', 'MO', 'NR', 'MV', 'DK', 'AR2', 'TW2')
+
+
+#Samples REIJ_4 REIJ_5 REIJ_6 have NA values, remove these from data frames
+df_abiotic <- df_abiotic[!(df_abiotic$sample=="V60" | df_abiotic$sample=="V61" | df_abiotic$sample=="V62"),]
+extradata <- extradata[!(extradata$sample.code=="V60" | extradata$sample.code=="V61" |  extradata$sample.code=="V62"),]
+df_16S <- subset(df_16S, select = - c(V60, V61, V62))
+df_ITS <- subset(df_ITS, select = - c(V60, V61, V62))
+
+```
+
+
+# Mantel test comparison abiotic and biotic data
+
+```{r Mantel test}
+
+##Prep data sets
+
+bact_for_ab <- data.frame(t(df_16S)) 
+bact_for_mb <- data.frame(t(subset(df_16S, select = -c(V92)))) #remove V92 as this is not in ITS data set
+
+fung_for_ab <- data.frame(t(df_ITS)) 
+fung_for_mb <- data.frame(t(subset(df_ITS, select = -c(V82)))) #remove V82 as this is not in 16s data set
+
+
+#Load in the abiotic data, make separate df for ITS and 16S (due to missing V82/V92) and scale the different parameters 
+
+abiotic_bact <- df_abiotic[which(df_abiotic$sample!="V82"),]
+rownames(abiotic_bact) <- abiotic_bact$sample
+abiotic_bact2 <- data.frame(subset(abiotic_bact, select = c(SOM, PO4, C_percentage, N_percentage)))
+abiotic_bact_scale <- scale(abiotic_bact2, center = TRUE, scale = TRUE)
+
+abiotic_fung <- df_abiotic[which(df_abiotic$sample!="V92"),]
+rownames(abiotic_fung) <- abiotic_fung$sample
+abiotic_fung2 <- data.frame(subset(abiotic_fung, select = c(SOM, PO4, C_percentage, N_percentage)))
+abiotic_fung_scale <- scale(abiotic_fung2, center = TRUE, scale = TRUE)
+
+ab_both <- df_abiotic[which(df_abiotic$sample != "V92" & df_abiotic$sample != "V82"),]
+rownames(ab_both) <- ab_both$sample
+ab_both2 <- data.frame(subset(ab_both, select = c(SOM, PO4, C_percentage, N_percentage)))
+ab_both_scale <- scale(ab_both2, center = TRUE, scale = TRUE)
+
+# Create distance matrices based on abiotic or biotic differences
+abfun_dist <- dist(abiotic_fung_scale, method = "euclidean")
+abbac_dist <- dist(abiotic_bact_scale, method = "euclidean")
+abboth_dist <- dist(ab_both_scale, method = "euclidean")
+bact_ab_dist <- vegdist(bact_for_ab, method = "bray")
+fung_ab_dist <- vegdist(fung_for_ab, method = "bray")
+bact_mb_dist <- vegdist(bact_for_mb, method = "bray")
+fung_mb_dist <- vegdist(fung_for_mb, method = "bray")
+
+# Performing a Mantel test to see if the distance matrices are comparable
+ab_bact <- mantel(abbac_dist, bact_ab_dist)
+ab_bact
+capture.output(ab_bact, file = "mantel_ab_bact.txt")
+
+ab_fung <- mantel(abfun_dist, fung_ab_dist)
+ab_fung
+capture.output(ab_fung, file = "mantel_ab_fung.txt")
+
+bact_fung <- mantel(bact_mb_dist, fung_mb_dist)
+bact_fung
+capture.output(bact_fung, file = "mantel_bact_fung.txt")
+
+```
+
+# CCA comparison abiotic and biotic data
+
+```{r Data prep CCA}
+
+#Prepare abiotic data, removing missing samples and unnecessary columns, df without REIJ456
+
+abiotic_16S <- df_abiotic[which(df_abiotic$sample != "V82"),]
+rownames(abiotic_16S) <- abiotic_16S$sample #adds sample number as row names
+abiotic_factors_16S <- subset(abiotic_16S, select = c(SOM, PO4, C_percentage, N_percentage, succession))
+abiotic_factors_16S$succession <- as.factor(abiotic_factors_16S$succession)
+
+abiotic_ITS <- df_abiotic[which(df_abiotic$sample != "V92"),]
+rownames(abiotic_ITS) <- abiotic_ITS$sample #adds sample number as row names
+abiotic_factors_ITS <- subset(abiotic_ITS, select = c(SOM, PO4, C_percentage, N_percentage, succession))
+abiotic_factors_ITS$succession <- as.factor(abiotic_factors_ITS$succession)
+
+#Prepare microbiome data (transform the data sets)
+bact_full <- data.frame(t(df_16S)) 
+fung_full <- data.frame(t(df_ITS)) 
+
+``` 
+
+```{r Prep alternative ggplot2}
+
+# Installing and loading necessary packages
+
+#https://rdrr.io/github/gavinsimpson/ggvegan/f/README.md
+options(repos = c(
+  gavinsimpson = 'https://gavinsimpson.r-universe.dev',
+  CRAN = 'https://cloud.r-project.org'))
+install.packages('ggvegan')
+library(ggvegan) #ggplot2 plots for vegan package
+library(scales) #scale functions for visualization
+
+cols = hue_pal()(4) #standard color set to match other plots 
+take <- c('CCA1', 'CCA2')  # which columns contain the scores we want, used for scaling arrows
+
+```
+
+## Bacteria
+
+```{r Bacterial CCA and ANOVA}
+
+# Perform a CCA on the bacterial OTUs as explained by the abiotic factors
+
+# CCA partitioning
+cca_formula_bact <- cca(bact_full ~ SOM + PO4 + C_percentage + N_percentage, data = abiotic_factors_16S)
+cca_bact <- summary(cca_formula_bact)
+cca_bact
+capture.output(cca_bact, file = "cca_bact.txt")
+
+#Calculating RSquare and RsquareAdj, statistic can be derived simply as Constrained / Total. 
+RS_bact <- RsquareAdj(cca_formula_bact) 
+RS_bact
+capture.output(RS_bact, file = "cca_RS_bact.txt")
+
+# Hypothesis testing (at least 999 permutations)
+
+# The first test examines overall model fit relative to a randomized or permuted matrix of data
+anova_overall_bact <- anova(cca_formula_bact, permutations = 999)
+anova_overall_bact
+capture.output(anova_overall_bact, file = "anova_overall_bact.txt")
+# The second test examines the partial effects of the individual variables included in the model
+anova_partial_bact <- anova(cca_formula_bact, by = 'margin', permutations = 999)
+anova_partial_bact
+capture.output(anova_partial_bact, file = "anova_partial_bact.txt")
+
+```
+
+```{r ggplot2 bacterial CCA }
+
+f_cca_formula_bact <- fortify(cca_formula_bact) #fortify ordination
+
+abiotic_factors_16S$succession <- ordered(abiotic_factors_16S$succession, 
+                                          levels = c('agricultural', 'mid succession', 'late succession', 'road verge'))
+
+#scaling arrows for ggplot (automatically done in plot() and autoplot() )
+arrows_bact <- subset(f_cca_formula_bact, Score == 'biplot')  # take only biplot arrow scores
+mul_bact <- ggvegan:::arrowMul(arrows_bact[, take],subset(f_cca_formula_bact, select = take, Score == 'sites')) 
+# multiplier for arrows to scale them to the plot range
+arrows_bact[, take] <- arrows_bact[, take] * mul_bact  # scale biplot arrows
+
+arrows_bact[arrows_bact == "C_percentage"] <- "C%" #to change variable label in plot
+arrows_bact[arrows_bact == "N_percentage"] <- "N%" #to change variable label in plot
+arrows_bact[arrows_bact == "PO4"] <- "PO[4]-P" #to change variable label in plot
+
+# CCA biplot without sample labels
+ggplot(f_cca_formula_bact, aes(x = CCA1, y = CCA2)) + 
+        geom_point(data = subset(f_cca_formula_bact , Score =="sites"), 
+                   aes(colour = factor(abiotic_factors_16S$succession), shape = factor(abiotic_factors_16S$succession))) +
+        scale_colour_manual(values = cols, limits = c('agricultural', 'mid succession', 'late succession', 'road verge')) +
+        scale_shape_manual(values = c(19, 17, 15, 8)) +
+        theme_bw()+ 
+        theme(legend.position="right",legend.text=element_text(size=10), legend.direction='vertical') +
+        geom_text_repel(data = arrows_bact, aes(colour =  "grey33", x= CCA1,y=CCA2, label=Label), size=3, 
+                        show.legend = FALSE) +
+        geom_segment(data = arrows_bact, mapping = aes(colour =  "grey33", x = 0, y = 0, xend = CCA1, yend = CCA2),
+             arrow = arrow(length = unit(0.01, "npc")), show.legend = FALSE) +
+        coord_fixed() +
+        guides(colour=guide_legend(title="succession class"), shape=guide_legend(title="succession class"))
+ggsave2(filename= "biplot_cca_bact_gg.png", device = "png", width=6, height=6)
+
+```
+
+##Fungi
+
+```{r Fungal CCA and ANOVA}
+
+# Perform a CCA on the fungal OTUs as explained by the abiotic factors
+
+# CCA partitioning
+cca_formula_fung <- cca(fung_full ~ SOM + PO4 + C_percentage + N_percentage, data = abiotic_factors_ITS)
+cca_fung <- summary(cca_formula_fung)
+cca_fung
+capture.output(cca_fung, file = "cca_fung.txt")
+
+
+#Calculating RSquare and RsquareAdj, statistic can be derived simply as Constrained / Total. 
+RS_fung <- RsquareAdj(cca_formula_fung) 
+RS_fung
+capture.output(RS_fung, file = "cca_RS_fung.txt")
+
+# Hypothesis testing (at least 999 permutations)
+
+# The first test examines overall model fit relative to a randomized or permuted matrix of data
+anova_overall_fung <- anova(cca_formula_fung, permutations = 999)
+anova_overall_fung
+capture.output(anova_overall_fung, file = "anova_overall_fung.txt")
+# The second test examines the partial effects of the individual variables included in the model
+anova_partial_fung <- anova(cca_formula_fung, by = 'margin', permutations = 999)
+anova_partial_fung
+capture.output(anova_partial_fung, file = "anova_partial_fung.txt")
+
+```
+
+```{r ggplot2 fungal CCA}
+
+f_cca_formula_fung <- fortify(cca_formula_fung)
+
+abiotic_factors_ITS$succession <- ordered(abiotic_factors_ITS$succession, 
+                                          levels = c('agricultural', 'mid succession', 'late succession', 'road verge'))
+
+#scaling arrows for ggplot (automatically done in plot() and autoplot() )
+arrows_fung <- subset(f_cca_formula_fung, Score == 'biplot')  # take only biplot arrow scores
+mul_fung <- ggvegan:::arrowMul(arrows_fung[, take],subset(f_cca_formula_fung, select = take, 
+                                                                Score == 'sites'))
+# multiplier for arrows to scale them to the plot range
+arrows_fung[, take] <- arrows_fung[, take] * mul_fung # scale biplot arrows
+
+arrows_fung[arrows_fung == "C_percentage"] <- "C%" #to change variable label in plot
+arrows_fung[arrows_fung == "N_percentage"] <- "N%" #to change variable label in plot
+arrows_fung[arrows_fung == "PO4"] <- "PO[4]-P" #to change variable label in plot
+
+# CCA biplot without sample labels
+ggplot(f_cca_formula_fung, aes(x = CCA1, y = CCA2)) + 
+        geom_point(data = subset(f_cca_formula_fung , Score =="sites"), 
+                   aes(colour = factor(abiotic_factors_ITS$succession), shape = factor(abiotic_factors_ITS$succession))) +
+        scale_colour_manual(values = cols, limits = c('agricultural', 'mid succession', 'late succession', 'road verge')) +
+        scale_shape_manual(values = c(19, 17, 15, 8)) +
+        theme_bw() +
+        theme(legend.position="right",legend.text=element_text(size=10), legend.direction='vertical') +
+        geom_text_repel(data = arrows_fung, aes(colour =  "grey33", x= CCA1,y=CCA2, label=Label), 
+                        size=3, show.legend = FALSE) +
+        geom_segment(data = arrows_fung, mapping = aes(colour =  "grey33", x = 0, y = 0, xend = CCA1, yend = CCA2),
+             arrow = arrow(length = unit(0.01, "npc")), show.legend = FALSE) +
+        coord_fixed() +
+        guides(colour=guide_legend(title="succession class"), shape=guide_legend(title="succession class"))
+ggsave2(filename= "biplot_cca_fung_gg.png", device = "png", width=5, height=4)
+
+```
+
