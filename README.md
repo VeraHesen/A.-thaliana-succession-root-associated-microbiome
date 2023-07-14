@@ -8,7 +8,7 @@ RMarkdown files are provided to process the abiotic and biotic data. Input files
 Analysis and plotting of soil abiotic factors (PO4, SOM, C%, N% and CN) through ANOVA + Tukey post hoc, PCA, MANOVA and LDA
 
 # Biotic
-Analysis and plotting of 16S and ITS count data (output of DADA2 and PIPIS respectively). 16S and ITS data are analysed seperately
+Analysis and plotting of 16S and ITS count data (output of DADA2 and PIPITS respectively). 16S and ITS data are analysed seperately
 
 ## 16S_data
 - raw_count_data_16S; rarefied and alpha diversity assessed
@@ -20,4 +20,4 @@ Analysis and plotting of 16S and ITS count data (output of DADA2 and PIPIS respe
 - normalized_OTU_count_data_ITS; unique and overlapping OTUs, top 10 most abundant OTUs, beta diversity, PERMANOVA + pairwise PERMANOVA
 
 # Abiotic Biotic
-Analysis of abiotic data together with the biotic data through Mantel tests and CCA
+Analysis of abiotic data together with the biotic data through Mantel tests and Canonical Correspondance Analysis (CCA).
